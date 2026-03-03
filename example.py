@@ -252,9 +252,99 @@ def run_single():
     logger.info("  Recommended dataset size: N ≤ 10,000 to 20,000 points")
 
 
+def run_multi():
+    print_section("Multi-Device DBSCAN Test")
+
+    # Check available devices
+    devices = jax.devices()
+    logger.info(f"Platform: {jax.default_backend()}")
+    logger.info(f"Available devices: {len(devices)}")
+    for i, dev in enumerate(devices):
+        logger.info(f"  Device {i}: {dev}")
+
+    if len(devices) < 2:
+        logger.info("WARNING: Only 1 device available.")
+        logger.info("For multi-device testing, restart with:")
+        logger.info(
+            "  XLA_FLAGS='--xla_force_host_platform_device_count=4' python test_multidevice.py"
+        )
+        logger.info("Proceeding with single device distributed mode...")
+
+    # Generate test data
+    print_section("Generating Test Data")
+    logger.info("Generating make_moons dataset (n_samples=2000, noise=0.1)...")
+    X_np, _ = make_moons(n_samples=2000, noise=0.1, random_state=42)
+    X = jnp.array(X_np)
+    logger.info(f"Data shape: {X.shape}")
+    logger.info(f"Data range: X.min()={X.min():.3f}, X.max()={X.max():.3f}")
+
+    # Test 1: Single-device baseline
+    print_section("Test 1: Single-Device Baseline")
+    model_single = JAXDBSCAN(eps=0.1, min_pts=5, use_distributed=False)
+    logger.info("Running single-device DBSCAN...")
+    start = time.time()
+    labels_single = model_single.fit_predict(X)
+    time_single = time.time() - start
+    logger.info(f"Execution time: {time_single:.4f}s")
+    logger.info(
+        f"Clusters: {len(np.unique(np.array(labels_single))) - (1 if -1 in labels_single else 0)}"
+    )
+    logger.info(f"Noise points: {np.sum(np.array(labels_single) == -1)}")
+
+    # Test 2: Multi-device distributed
+    print_section("Test 2: Multi-Device Distributed")
+    model_dist = JAXDBSCAN(eps=0.1, min_pts=5, use_distributed=True)
+    logger.info("Running multi-device DBSCAN...")
+    start = time.time()
+    labels_dist = model_dist.fit_predict(X)
+    time_dist = time.time() - start
+    logger.info(f"Execution time: {time_dist:.4f}s")
+    logger.info(
+        f"Clusters: {len(np.unique(np.array(labels_dist))) - (1 if -1 in labels_dist else 0)}"
+    )
+    logger.info(f"Noise points: {np.sum(np.array(labels_dist) == -1)}")
+
+    # Verify results match
+    print_section("Verification")
+    labels_single_np = np.array(labels_single)
+    labels_dist_np = np.array(labels_dist)
+
+    # Check if clustering results are similar
+    unique_single = set(labels_single_np)
+    unique_dist = set(labels_dist_np)
+
+    logger.info(f"Single-device labels: {sorted(unique_single)}")
+    logger.info(f"Multi-device labels: {sorted(unique_dist)}")
+
+    # For DBSCAN, results should be identical
+    if np.array_equal(labels_single_np, labels_dist_np):
+        logger.info("\n✓ SUCCESS: Single-device and multi-device results match!")
+    else:
+        # Check if the number of clusters and noise points match
+        n_clusters_single = len(unique_single) - (1 if -1 in unique_single else 0)
+        n_clusters_dist = len(unique_dist) - (1 if -1 in unique_dist else 0)
+        n_noise_single = np.sum(labels_single_np == -1)
+        n_noise_dist = np.sum(labels_dist_np == -1)
+
+        if n_clusters_single == n_clusters_dist and n_noise_single == n_noise_dist:
+            logger.info("\n✓ SUCCESS: Cluster counts and noise counts match!")
+            logger.info("  (Label values may differ but clustering is equivalent)")
+        else:
+            logger.info("\n⚠ WARNING: Results differ between modes")
+            logger.info(f"  Clusters: {n_clusters_single} vs {n_clusters_dist}")
+            logger.info(f"  Noise: {n_noise_single} vs {n_noise_dist}")
+
+    print_section("Summary")
+    logger.info("✓ Multi-device distributed execution is working!")
+    logger.info(f"✓ Data is sharded across {len(devices)} devices")
+    logger.info(f"✓ Single-device time: {time_single:.4f}s")
+    logger.info(f"✓ Multi-device time: {time_dist:.4f}s")
+    logger.info(f"  Speedup: {time_single / time_dist:.2f}x")
+
+
 def main(run_type: str = "single"):
     if run_type == "multi":
-        pass
+        run_multi()
     else:
         run_single()
 

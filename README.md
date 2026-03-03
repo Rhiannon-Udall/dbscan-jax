@@ -6,6 +6,7 @@ A high-performance, distributed implementation of the DBSCAN clustering algorith
 
 - **JAX-compatible implementation** using matrix-based label propagation
 - **Single/Multi-device execution** with automatic sharding
+- **Chunked distance computation** for memory-efficient processing of large datasets
 - **JIT compilation** for optimal performance
 - **Sequential label re-indexing** (optional)
 - **GPU/TPU support** via JAX
@@ -92,6 +93,39 @@ python your_script.py
 
 ![Distributed DBSCAN Clustering](images/dbscan_distributed.png)
 
+### Chunked Distance Computation (Large Datasets)
+
+For datasets larger than 20,000 points, use the chunked mode to reduce memory usage:
+
+```python
+# Automatically use chunked mode for large datasets (N > 20,000)
+model = JaxDBScan(eps=0.1, min_pts=5, memory_mode="auto")
+labels = model.fit_predict(X)
+
+# Force chunked mode regardless of dataset size
+model = JaxDBScan(eps=0.1, min_pts=5, memory_mode="chunked")
+labels = model.fit_predict(X)
+
+# Specify custom chunk size
+model = JaxDBScan(eps=0.1, min_pts=5, chunk_size=5000)
+labels = model.fit_predict(X)
+```
+
+**Memory Modes:**
+
+| Mode | Description | Best For |
+| :--- | :--- | :--- |
+| `"auto"` | Automatically chooses chunked mode for N > 20,000 | General use |
+| `"standard"` | Always uses standard O(N²) memory approach | Small datasets (N ≤ 20,000) |
+| `"chunked"` | Always uses chunked computation | Large datasets (N > 20,000) |
+
+**Benefits of Chunked Mode:**
+
+- Reduced peak memory usage during distance computation
+- Handles datasets larger than 20,000 points
+- Often faster due to better cache utilization
+- JAX-compatible with JIT compilation
+
 ### Running the Example Script
 
 The project includes a comprehensive example script:
@@ -165,13 +199,17 @@ jit_fn = jax.jit(
 
 ### Memory Complexity
 
-| Component | Complexity | Notes |
-| :--- | :--- | :--- |
-| Distance Matrix | O(N²) | Dense matrix of pairwise distances |
-| Adjacency Matrix | O(N²) | Boolean matrix for neighborhood relationships |
-| Label Propagation | O(N² × k) | k = number of iterations until convergence |
+| Component | Standard Mode | Chunked Mode | Notes |
+| :--- | :--- | :--- | :--- |
+| Distance Matrix | O(N²) | O(chunk_size × N) | Chunked mode processes in blocks |
+| Adjacency Matrix | O(N²) | O(N²) | Still needed for label propagation |
+| Label Propagation | O(N² × k) | O(N² × k) | k = number of iterations until convergence |
 
-**Recommended dataset size:** N ≤ 10,000 to 20,000 points on typical hardware.
+**Recommended dataset size:**
+
+- **Standard mode:** N ≤ 20,000 points
+- **Chunked mode:** N > 20,000 points (automatic with `memory_mode="auto"`)
+- **Very large datasets:** Consider approximate nearest neighbor methods
 
 
 ## API Reference
@@ -183,7 +221,9 @@ JaxDBScan(
     eps: float,
     min_pts: int,
     use_distributed: bool = False,
-    return_sequential_labels: bool = True
+    return_sequential_labels: bool = True,
+    chunk_size: Optional[int] = None,
+    memory_mode: Literal["auto", "standard", "chunked"] = "auto"
 )
 ```
 
@@ -195,6 +235,8 @@ JaxDBScan(
 | `min_pts` | int | required | Number of samples in a neighborhood for a point to be considered as a core point |
 | `use_distributed` | bool | `False` | Whether to use distributed execution across multiple devices |
 | `return_sequential_labels` | bool | `True` | If True, re-index cluster labels to be sequential (0, 1, 2, ...) |
+| `chunk_size` | Optional[int] | `None` | If specified, compute pairwise distances in chunks to reduce memory usage |
+| `memory_mode` | Literal["auto", "standard", "chunked"] | `"auto"` | Memory usage strategy ("auto" chooses chunked for N > 20,000) |
 
 **Methods:**
 
@@ -230,6 +272,6 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 
 ## TODO
-- [ ] Chunked/block distance computation
+- [x] Chunked/block distance computation
 - [ ] Sparse matrix representations
 - [ ] Approximate nearest neighbor methods

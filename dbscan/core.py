@@ -14,8 +14,9 @@ The algorithm consists of these main steps:
 
 import jax
 import jax.numpy as jnp
-from jax.sharding import Mesh, PartitionSpec, NamedSharding
 from jax.experimental import mesh_utils
+from jax.sharding import Mesh, NamedSharding, PartitionSpec
+from typing import Literal, Optional
 
 
 class JaxDBScan:
@@ -40,6 +41,16 @@ class JaxDBScan:
     return_sequential_labels : bool, default=True
         If True, re-index cluster labels to be sequential (0, 1, 2, ...).
         If False, labels are derived from original point indices.
+    chunk_size : Optional[int], default=None
+        If specified, compute pairwise distances in chunks to reduce memory usage.
+        This allows processing larger datasets at the cost of additional computation time.
+        Recommended for datasets with N > 20,000.
+        If None, uses the standard O(N²) memory approach.
+    memory_mode : Literal["auto", "standard", "chunked"], default="auto"
+        Memory usage strategy:
+        - "auto": Automatically choose chunked mode for N > 20,000
+        - "standard": Always use standard O(N²) memory approach (faster, more memory)
+        - "chunked": Always use chunked computation (slower, less memory)
 
     Attributes:
     -----------
@@ -54,8 +65,12 @@ class JaxDBScan:
 
     Notes:
     ------
-    Memory Complexity: O(N²) due to the dense pairwise distance matrix.
-    Recommended for datasets with N ≤ 10,000 to 20,000 points.
+    Memory Complexity:
+        - Standard mode: O(N²) due to the dense pairwise distance matrix.
+        - Chunked mode: O(chunk_size × N) for intermediate computations.
+
+    Recommended for datasets with N ≤ 10,000 to 20,000 points in standard mode.
+    Use chunked mode for larger datasets (N > 20,000).
 
     Examples:
     ---------
@@ -65,6 +80,8 @@ class JaxDBScan:
     >>> model = JaxDBScan(eps=0.5, min_pts=2)
     >>> labels = model.fit_predict(X)
     >>> print(labels)  # [0, 0, -1] or similar
+    >>> # For larger datasets, use chunked mode
+    >>> model = JaxDBScan(eps=0.5, min_pts=2, memory_mode="chunked")
     """
 
     def __init__(
@@ -73,12 +90,17 @@ class JaxDBScan:
         min_pts: int,
         use_distributed: bool = False,
         return_sequential_labels: bool = True,
+        chunk_size: Optional[int] = None,
+        memory_mode: Literal["auto", "standard", "chunked"] = "auto",
     ):
         self.eps = eps
         self.min_pts = min_pts
         self.use_distributed = use_distributed
         self.return_sequential_labels = return_sequential_labels
+        self.chunk_size = chunk_size
+        self.memory_mode = memory_mode
         self._jit_fit_predict = None
+        self._jit_fit_predict_chunked = None
         self.labels_ = None
 
     def _core_algorithm(self, X: jax.Array) -> jax.Array:
@@ -165,6 +187,156 @@ class JaxDBScan:
 
         return out_labels
 
+    def _compute_adjacency_chunked(self, X: jax.Array, chunk_size: int) -> jax.Array:
+        """
+        Compute adjacency matrix using chunked distance computation.
+
+        This method processes the distance matrix in blocks to reduce peak memory usage.
+        It uses a JAX-compatible approach with jax.lax.scan to avoid dynamic slicing.
+
+        Parameters:
+        -----------
+        X : jax.Array
+            Input data of shape (N, D).
+        chunk_size : int
+            Size of chunks to process. Must evenly divide N for JIT compatibility.
+
+        Returns:
+        --------
+        A : jax.Array
+            Boolean adjacency matrix of shape (N, N) where A[i, j] is True if
+            the distance between points i and j is <= eps.
+        """
+        N = X.shape[0]
+        eps = self.eps
+
+        # Pad X to make it divisible by chunk_size
+        pad_size = (chunk_size - (N % chunk_size)) % chunk_size
+        N_padded = N + pad_size
+
+        # Pad with zeros (won't affect distances since we'll handle padding)
+        X_padded = jnp.pad(
+            X, ((0, pad_size), (0, 0)), mode="constant", constant_values=0
+        )
+
+        # Number of chunks
+        n_chunks = N_padded // chunk_size
+
+        def process_chunk(carry, idx):
+            """Process a chunk of rows."""
+            A_accumulated = carry
+
+            # Reshape to get the current chunk
+            # Shape: (n_chunks, chunk_size, D)
+            X_reshaped = X_padded.reshape(n_chunks, chunk_size, -1)
+
+            # Get current chunk: (chunk_size, D)
+            current_chunk = X_reshaped[idx]
+
+            # Compute distances from this chunk to all padded points
+            # Shape: (chunk_size, N_padded, D)
+            diff = current_chunk[:, None, :] - X_padded[None, :, :]
+            dists = jnp.linalg.norm(diff, axis=-1)
+
+            # Build adjacency for this chunk
+            A_chunk = dists <= eps
+
+            # Reshape accumulated matrix to update
+            A_reshaped = A_accumulated.reshape(n_chunks, chunk_size, N_padded)
+
+            # Update the chunk
+            A_reshaped = A_reshaped.at[idx].set(A_chunk)
+
+            # Reshape back
+            A_updated = A_reshaped.reshape(N_padded, N_padded)
+
+            return A_updated, idx + 1
+
+        # Initialize adjacency matrix as all False
+        A_init = jnp.zeros((N_padded, N_padded), dtype=bool)
+
+        # Process all chunks
+        A_final, _ = jax.lax.scan(
+            process_chunk,
+            A_init,
+            jnp.arange(n_chunks),
+        )
+
+        # Remove padding
+        A_final = A_final[:N, :N]
+
+        return A_final
+
+    def _core_algorithm_chunked(self, X: jax.Array, chunk_size: int) -> jax.Array:
+        """
+        Core DBSCAN algorithm using chunked distance computation.
+
+        This method implements the same algorithm as _core_algorithm but computes
+        the adjacency matrix in blocks to reduce memory usage during distance computation.
+
+        Parameters:
+        -----------
+        X : jax.Array
+            Input data of shape (N, D).
+        chunk_size : int
+            Size of chunks for distance computation. Will pad to nearest multiple.
+
+        Returns:
+        --------
+        labels : jax.Array
+            Cluster labels of shape (N,).
+        """
+        N = X.shape[0]
+
+        # 1. Compute adjacency matrix using chunked distance computation
+        A = self._compute_adjacency_chunked(X, chunk_size)
+
+        # 2. Core Points Identification
+        degrees = jnp.sum(A, axis=1)
+        core_mask = degrees >= self.min_pts
+
+        # 3. Core-to-Core Adjacency Mask
+        A_core = A & core_mask[:, None] & core_mask[None, :]
+
+        # 4. Connected Components (Label Propagation)
+        init_labels = jnp.arange(N)
+
+        def cond_fn(state):
+            _, changed = state
+            return changed
+
+        def body_fn(state):
+            labels, _ = state
+            # Propagate maximum label from neighboring core points
+            neighbor_labels = jnp.where(A_core, labels[None, :], -1)
+            new_labels = jnp.max(neighbor_labels, axis=1)  # type: ignore
+
+            # Only update labels for core points
+            new_labels = jnp.where(core_mask, new_labels, labels)
+
+            # Check for convergence
+            changed = jnp.any(new_labels != labels)
+            return new_labels, changed
+
+        # Run while loop until labels stop changing
+        final_labels, _ = jax.lax.while_loop(cond_fn, body_fn, (init_labels, True))
+
+        # 5. Boundary and Noise Assignment
+        A_border = A & (~core_mask[:, None]) & core_mask[None, :]
+        border_neighbor_labels = jnp.where(A_border, final_labels[None, :], -1)  # type: ignore
+        border_labels = jnp.max(border_neighbor_labels, axis=1)
+
+        is_border = jnp.any(A_border, axis=1)
+
+        # Combine labels
+        out_labels = jnp.where(
+            core_mask,
+            final_labels,  # type: ignore
+            jnp.where(is_border, border_labels, -1),
+        )  # type: ignore
+
+        return out_labels
+
     def _reindex_labels(self, labels: jax.Array) -> jax.Array:
         """
         Re-index cluster labels to be sequential (0, 1, 2, ...).
@@ -212,6 +384,7 @@ class JaxDBScan:
 
         JIT compiles the core algorithm on the first call for efficiency.
         Applies sharding specifications if use_distributed is True.
+        Automatically selects chunked mode for large datasets based on memory_mode.
 
         Parameters:
         -----------
@@ -239,30 +412,73 @@ class JaxDBScan:
         >>> model = JaxDBScan(eps=0.5, min_pts=2)
         >>> labels = model.fit_predict(X)
         """
-        if self._jit_fit_predict is None:
-            if self.use_distributed:
-                devices = jax.devices()
-                if len(devices) == 0:
-                    raise RuntimeError("No devices available for distributed execution")
+        N = X.shape[0]
 
-                # Create a 1D device mesh across all available devices
-                device_mesh = mesh_utils.create_device_mesh((len(devices),))
-                mesh = Mesh(device_mesh, axis_names=("batch",))
+        # Determine whether to use chunked mode
+        use_chunked = False
+        chunk_size = 10000  # Default chunk size
 
-                # Shard the data along the first axis ('batch')
-                in_sharding = NamedSharding(mesh, PartitionSpec("batch", None))
-                out_sharding = NamedSharding(mesh, PartitionSpec("batch"))
+        if self.chunk_size is not None:
+            use_chunked = True
+            chunk_size = self.chunk_size
+        elif self.memory_mode == "chunked":
+            use_chunked = True
+        elif self.memory_mode == "auto" and N > 20000:
+            use_chunked = True
 
-                self._jit_fit_predict = jax.jit(
-                    self._core_algorithm,
-                    in_shardings=(in_sharding,),
-                    out_shardings=out_sharding,
-                )
-            else:
-                self._jit_fit_predict = jax.jit(self._core_algorithm)
+        if use_chunked:
+            # Use chunked algorithm
+            if self._jit_fit_predict_chunked is None:
+                # Partial application of chunk_size
+                core_chunked = lambda x: self._core_algorithm_chunked(x, chunk_size)  # noqa: E731
 
-        # Execute the compiled function
-        labels = self._jit_fit_predict(X)
+                if self.use_distributed:
+                    devices = jax.devices()
+                    if len(devices) == 0:
+                        raise RuntimeError(
+                            "No devices available for distributed execution"
+                        )
+
+                    device_mesh = mesh_utils.create_device_mesh((len(devices),))
+                    mesh = Mesh(device_mesh, axis_names=("batch",))
+
+                    in_sharding = NamedSharding(mesh, PartitionSpec("batch", None))
+                    out_sharding = NamedSharding(mesh, PartitionSpec("batch"))
+
+                    self._jit_fit_predict_chunked = jax.jit(
+                        core_chunked,
+                        in_shardings=(in_sharding,),
+                        out_shardings=out_sharding,
+                    )
+                else:
+                    self._jit_fit_predict_chunked = jax.jit(core_chunked)
+
+            labels = self._jit_fit_predict_chunked(X)
+        else:
+            # Use standard algorithm
+            if self._jit_fit_predict is None:
+                if self.use_distributed:
+                    devices = jax.devices()
+                    if len(devices) == 0:
+                        raise RuntimeError(
+                            "No devices available for distributed execution"
+                        )
+
+                    device_mesh = mesh_utils.create_device_mesh((len(devices),))
+                    mesh = Mesh(device_mesh, axis_names=("batch",))
+
+                    in_sharding = NamedSharding(mesh, PartitionSpec("batch", None))
+                    out_sharding = NamedSharding(mesh, PartitionSpec("batch"))
+
+                    self._jit_fit_predict = jax.jit(
+                        self._core_algorithm,
+                        in_shardings=(in_sharding,),
+                        out_shardings=out_sharding,
+                    )
+                else:
+                    self._jit_fit_predict = jax.jit(self._core_algorithm)
+
+            labels = self._jit_fit_predict(X)
 
         # Re-index labels if requested
         if self.return_sequential_labels:

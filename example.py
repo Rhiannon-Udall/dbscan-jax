@@ -1,5 +1,5 @@
 """
-Test script for JAXDBSCAN implementation.
+Test script for JaxDBScan implementation.
 
 This script tests the DBSCAN implementation with:
 1. Environment verification (device availability)
@@ -22,7 +22,7 @@ from typing import Optional
 import jax
 import jax.numpy as jnp
 
-from dbscan import JAXDBSCAN
+from dbscan import JaxDBScan
 
 
 def print_section(title: str):
@@ -62,9 +62,9 @@ def test_single_device():
 
     # Initialize and run DBSCAN
     logger.info(
-        "\nInitializing JAXDBSCAN(eps=0.1, min_pts=5, use_distributed=False)..."
+        "\nInitializing JaxDBScan(eps=0.1, min_pts=5, use_distributed=False)..."
     )
-    model = JAXDBSCAN(eps=0.1, min_pts=5, use_distributed=False)
+    model = JaxDBScan(eps=0.1, min_pts=5, use_distributed=False)
 
     logger.info("Running fit_predict...")
     start_time = time.time()
@@ -111,8 +111,8 @@ def test_distributed_execution():
     logger.info(f"Data shape: {X.shape}")
 
     # Initialize and run DBSCAN with distributed execution
-    logger.info("\nInitializing JAXDBSCAN(eps=0.1, min_pts=5, use_distributed=True)...")
-    model = JAXDBSCAN(eps=0.1, min_pts=5, use_distributed=True)
+    logger.info("\nInitializing JaxDBScan(eps=0.1, min_pts=5, use_distributed=True)...")
+    model = JaxDBScan(eps=0.1, min_pts=5, use_distributed=True)
 
     logger.info("Running fit_predict with distributed sharding...")
     start_time = time.time()
@@ -214,7 +214,7 @@ def run_verification_tests(labels):
 def run_single():
     """Run all tests."""
     logger.info("\n" + "=" * 60)
-    logger.info("  JAXDBSCAN Implementation Test Suite")
+    logger.info("  JaxDBScan Implementation Test Suite")
     logger.info("=" * 60)
 
     # Check environment
@@ -280,7 +280,7 @@ def run_multi():
 
     # Test 1: Single-device baseline
     print_section("Test 1: Single-Device Baseline")
-    model_single = JAXDBSCAN(eps=0.1, min_pts=5, use_distributed=False)
+    model_single = JaxDBScan(eps=0.1, min_pts=5, use_distributed=False)
     logger.info("Running single-device DBSCAN...")
     start = time.time()
     labels_single = model_single.fit_predict(X)
@@ -293,7 +293,7 @@ def run_multi():
 
     # Test 2: Multi-device distributed
     print_section("Test 2: Multi-Device Distributed")
-    model_dist = JAXDBSCAN(eps=0.1, min_pts=5, use_distributed=True)
+    model_dist = JaxDBScan(eps=0.1, min_pts=5, use_distributed=True)
     logger.info("Running multi-device DBSCAN...")
     start = time.time()
     labels_dist = model_dist.fit_predict(X)

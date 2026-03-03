@@ -18,7 +18,7 @@ from jax.sharding import Mesh, PartitionSpec, NamedSharding
 from jax.experimental import mesh_utils
 
 
-class JAXDBSCAN:
+class JaxDBScan:
     """
     JAX-based implementation of DBSCAN clustering using label propagation.
 
@@ -60,9 +60,9 @@ class JAXDBSCAN:
     Examples:
     ---------
     >>> import jax.numpy as jnp
-    >>> from dbscan import JAXDBSCAN
+    >>> from dbscan import JaxDBScan
     >>> X = jnp.array([[0, 0], [0.1, 0.1], [5, 5]])
-    >>> model = JAXDBSCAN(eps=0.5, min_pts=2)
+    >>> model = JaxDBScan(eps=0.5, min_pts=2)
     >>> labels = model.fit_predict(X)
     >>> print(labels)  # [0, 0, -1] or similar
     """
@@ -133,7 +133,7 @@ class JAXDBSCAN:
             labels, _ = state
             # Propagate maximum label from neighboring core points
             neighbor_labels = jnp.where(A_core, labels[None, :], -1)
-            new_labels = jnp.max(neighbor_labels, axis=1)
+            new_labels = jnp.max(neighbor_labels, axis=1)  # type: ignore
 
             # Only update labels for core points
             new_labels = jnp.where(core_mask, new_labels, labels)
@@ -148,7 +148,7 @@ class JAXDBSCAN:
         # 6. Boundary and Noise Assignment
         # Identify non-core points adjacent to core points
         A_border = A & (~core_mask[:, None]) & core_mask[None, :]
-        border_neighbor_labels = jnp.where(A_border, final_labels[None, :], -1)
+        border_neighbor_labels = jnp.where(A_border, final_labels[None, :], -1)  # type: ignore
         border_labels = jnp.max(border_neighbor_labels, axis=1)
 
         is_border = jnp.any(A_border, axis=1)
@@ -159,9 +159,9 @@ class JAXDBSCAN:
         # Noise -> -1
         out_labels = jnp.where(
             core_mask,
-            final_labels,
+            final_labels,  # type: ignore
             jnp.where(is_border, border_labels, -1),
-        )
+        )  # type: ignore
 
         return out_labels
 
@@ -234,9 +234,9 @@ class JAXDBSCAN:
         Examples:
         ---------
         >>> import jax.numpy as jnp
-        >>> from dbscan import JAXDBSCAN
+        >>> from dbscan import JaxDBScan
         >>> X = jnp.array([[0, 0], [0.1, 0], [0, 0.1], [5, 5]])
-        >>> model = JAXDBSCAN(eps=0.5, min_pts=2)
+        >>> model = JaxDBScan(eps=0.5, min_pts=2)
         >>> labels = model.fit_predict(X)
         """
         if self._jit_fit_predict is None:
@@ -271,7 +271,7 @@ class JAXDBSCAN:
         self.labels_ = labels
         return labels
 
-    def fit(self, X: jax.Array) -> "JAXDBSCAN":
+    def fit(self, X: jax.Array) -> "JaxDBScan":
         """
         Fit DBSCAN clustering model to the input data.
 
@@ -284,12 +284,12 @@ class JAXDBSCAN:
 
         Returns:
         --------
-        self : JAXDBSCAN
+        self : JaxDBScan
             Returns the fitted instance.
 
         Examples:
         ---------
-        >>> model = JAXDBSCAN(eps=0.5, min_pts=5)
+        >>> model = JaxDBScan(eps=0.5, min_pts=5)
         >>> model.fit(X)
         >>> print(model.labels_)
         """

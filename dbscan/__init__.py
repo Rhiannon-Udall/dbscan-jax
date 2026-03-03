@@ -14,13 +14,13 @@ Memory Constraints:
 
 Example:
     >>> import jax.numpy as jnp
-    >>> from dbscan import JAXDBSCAN
+    >>> from dbscan import JaxDBScan
     >>> X = jnp.array([[0, 0], [1, 1], [5, 5]])
-    >>> model = JAXDBSCAN(eps=0.5, min_pts=2)
+    >>> model = JaxDBScan(eps=0.5, min_pts=2)
     >>> labels = model.fit_predict(X)
 """
 
-from dbscan.core import JAXDBSCAN
+from dbscan.core import JaxDBScan
 
-__all__ = ["JAXDBSCAN"]
+__all__ = ["JaxDBScan"]
 __version__ = "0.1.0"

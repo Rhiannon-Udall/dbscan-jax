@@ -15,6 +15,8 @@ import numpy as np
 from sklearn.cluster import DBSCAN as SklearnDBSCAN
 from sklearn.datasets import make_blobs, make_circles
 
+from loguru import logger
+
 from dbscan import JaxDBScan
 
 
@@ -155,9 +157,9 @@ def benchmark_jax(
 
 def print_benchmark_header(title: str):
     """Print a formatted benchmark section header."""
-    print("\n" + "=" * 70)
-    print(f"  {title}")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info(f"  {title}")
+    logger.info("=" * 70)
 
 
 def print_benchmark_results(results: list[dict[str, Any]]):
@@ -166,16 +168,16 @@ def print_benchmark_results(results: list[dict[str, Any]]):
     Args:
         results: List of benchmark result dictionaries
     """
-    print(
+    logger.info(
         f"\n{'Implementation':<25} {'Time (s)':<12} {'Speedup':<10} {'Memory (MB)':<12} {'Clusters':<10} {'Noise':<10}"
     )
-    print("-" * 90)
+    logger.info("-" * 90)
 
     baseline_time = results[0]["time_mean"]
 
     for r in results:
         speedup = baseline_time / r["time_mean"]
-        print(
+        logger.info(
             f"{r['implementation']:<25} "
             f"{r['time_mean']:<12.4f} "
             f"{speedup:<10.2f}x "
@@ -196,12 +198,12 @@ def run_scaling_benchmark():
     all_results = []
 
     for n_samples in dataset_sizes:
-        print(f"\n--- Dataset Size: {n_samples:,} samples ---")
+        logger.info(f"\n--- Dataset Size: {n_samples:,} samples ---")
 
         X = generate_dataset(n_samples, dataset_type="blobs", random_state=42)
 
         # Benchmark scikit-learn
-        print("Running scikit-learn DBSCAN...")
+        logger.info("Running scikit-learn DBSCAN...")
         sklearn_result = benchmark_sklearn(X, eps, min_samples, n_runs=2)
         all_results.append(sklearn_result)
 
@@ -210,7 +212,7 @@ def run_scaling_benchmark():
             if mode == "standard" and n_samples > 20000:
                 continue  # Skip standard mode for large datasets
 
-            print(f"Running JAX DBSCAN ({mode} mode)...")
+            logger.info(f"Running JAX DBSCAN ({mode} mode)...")
             jax_result = benchmark_jax(X, eps, min_samples, memory_mode=mode, n_runs=2)
             all_results.append(jax_result)
 
@@ -229,17 +231,17 @@ def run_dataset_types_benchmark():
     all_results = []
 
     for dataset_type in dataset_types:
-        print(f"\n--- Dataset Type: {dataset_type.capitalize()} ---")
+        logger.info(f"\n--- Dataset Type: {dataset_type.capitalize()} ---")
 
         X = generate_dataset(n_samples, dataset_type=dataset_type, random_state=42)
 
         # Benchmark scikit-learn
-        print("Running scikit-learn DBSCAN...")
+        logger.info("Running scikit-learn DBSCAN...")
         sklearn_result = benchmark_sklearn(X, eps, min_samples, n_runs=3)
         all_results.append(sklearn_result)
 
         # Benchmark JAX
-        print("Running JAX DBSCAN...")
+        logger.info("Running JAX DBSCAN...")
         jax_result = benchmark_jax(X, eps, min_samples, memory_mode="auto", n_runs=3)
         all_results.append(jax_result)
 
@@ -260,8 +262,8 @@ def run_memory_modes_benchmark():
     memory_modes = ["standard", "chunked", "sparse", "ann"]
 
     for mode in memory_modes:
-        print(f"\n--- Memory Mode: {mode.upper()} ---")
-        print(f"Running JAX DBSCAN ({mode} mode)...")
+        logger.info(f"\n--- Memory Mode: {mode.upper()} ---")
+        logger.info(f"Running JAX DBSCAN ({mode} mode)...")
         jax_result = benchmark_jax(X, eps, min_samples, memory_mode=mode, n_runs=3)
         all_results.append(jax_result)
 
@@ -276,43 +278,45 @@ def run_main_benchmark():
     eps = 0.15
     min_samples = 5
 
-    print("\nDataset Configuration:")
-    print("  - Samples: {n_samples:,}")
-    print("  - Features: 2")
-    print("  - Dataset type: blobs")
-    print("  - eps: {eps}")
-    print("  - min_samples: {min_samples}")
-    print("  - JAX devices: {len(jax.devices())}")
-    print("  - Platform: {jax.devices()[0].platform}")
+    logger.info("\nDataset Configuration:")
+    logger.info("  - Samples: {n_samples:,}")
+    logger.info("  - Features: 2")
+    logger.info("  - Dataset type: blobs")
+    logger.info("  - eps: {eps}")
+    logger.info("  - min_samples: {min_samples}")
+    logger.info("  - JAX devices: {len(jax.devices())}")
+    logger.info("  - Platform: {jax.devices()[0].platform}")
 
     X = generate_dataset(n_samples, dataset_type="blobs", random_state=42)
 
     # Benchmark scikit-learn
-    print("\n--- scikit-learn DBSCAN ---")
+    logger.info("\n--- scikit-learn DBSCAN ---")
     sklearn_result = benchmark_sklearn(X, eps, min_samples, n_runs=5)
     all_results = [sklearn_result]
 
     # Benchmark JAX in different modes
-    print("\n--- JAX DBSCAN ---")
+    logger.info("\n--- JAX DBSCAN ---")
     for mode in ["standard", "chunked"]:
-        print(f"Running {mode} mode...")
+        logger.info(f"Running {mode} mode...")
         jax_result = benchmark_jax(X, eps, min_samples, memory_mode=mode, n_runs=5)
         all_results.append(jax_result)
 
     print_benchmark_results(all_results)
 
     # Print detailed statistics
-    print("\n" + "=" * 70)
-    print("  Detailed Statistics")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("  Detailed Statistics")
+    logger.info("=" * 70)
     for r in all_results:
-        print(f"\n{r['implementation']}:")
-        print(f"  Mean time:   {r['time_mean']:.4f} ± {r['time_std']:.4f} s")
-        print(f"  Min time:    {r['time_min']:.4f} s")
-        print(f"  Max time:    {r['time_max']:.4f} s")
-        print(f"  Memory:      {r['memory_mb']:.1f} MB")
-        print(f"  Clusters:    {r['n_clusters']}")
-        print(f"  Noise:       {r['n_noise']} ({r['n_noise']/n_samples*100:.1f}%)")
+        logger.info(f"\n{r['implementation']}:")
+        logger.info(f"  Mean time:   {r['time_mean']:.4f} ± {r['time_std']:.4f} s")
+        logger.info(f"  Min time:    {r['time_min']:.4f} s")
+        logger.info(f"  Max time:    {r['time_max']:.4f} s")
+        logger.info(f"  Memory:      {r['memory_mb']:.1f} MB")
+        logger.info(f"  Clusters:    {r['n_clusters']}")
+        logger.info(
+            f"  Noise:       {r['n_noise']} ({r['n_noise']/n_samples*100:.1f}%)"
+        )
 
 
 def main():
@@ -329,10 +333,10 @@ def main():
     )
     args = parser.parse_args()
 
-    print("\n" + "=" * 70)
-    print("  DBSCAN Benchmark Suite")
-    print("  Comparing JAX vs Scikit-learn Implementations")
-    print("=" * 70)
+    logger.info("\n" + "=" * 70)
+    logger.info("  DBSCAN Benchmark Suite")
+    logger.info("  Comparing JAX vs Scikit-learn Implementations")
+    logger.info("=" * 70)
 
     if args.benchmark == "main":
         run_main_benchmark()
@@ -343,9 +347,9 @@ def main():
     elif args.benchmark == "modes":
         run_memory_modes_benchmark()
 
-    print("\n" + "=" * 70)
-    print("  Benchmark Complete")
-    print("=" * 70 + "\n")
+    logger.info("\n" + "=" * 70)
+    logger.info("  Benchmark Complete")
+    logger.info("=" * 70 + "\n")
 
 
 if __name__ == "__main__":

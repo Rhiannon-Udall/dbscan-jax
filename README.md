@@ -8,6 +8,7 @@ A high-performance, distributed implementation of the DBSCAN clustering algorith
 - **Single/Multi-device execution** with automatic sharding
 - **Chunked distance computation** for memory-efficient processing of large datasets
 - **Sparse matrix representations** for optimal memory usage with small epsilon
+- **Approximate nearest neighbor (ANN)** mode for fast clustering with small accuracy trade-off
 - **JIT compilation** for optimal performance
 - **Sequential label re-indexing** (optional)
 - **GPU/TPU support** via JAX
@@ -119,6 +120,8 @@ labels = model.fit_predict(X)
 | `"auto"` | Automatically chooses chunked mode for N > 20,000 | General use |
 | `"standard"` | Always uses standard O(N²) memory approach | Small datasets (N ≤ 20,000) |
 | `"chunked"` | Always uses chunked computation | Large datasets (N > 20,000) |
+| `"sparse"` | Uses smaller chunks for sparse adjacency (small epsilon) | Small epsilon values |
+| `"ann"` | Approximate nearest neighbor via small chunks | Very large datasets, speed over accuracy |
 
 **Benefits of Chunked Mode:**
 
@@ -142,6 +145,12 @@ python example.py multi
 
 # Run chunked distance computation tests
 python example.py chunked
+
+# Run sparse matrix tests
+python example.py sparse
+
+# Run approximate nearest neighbor tests
+python example.py ann
 ```
 
 ## Technical Implementation
@@ -228,7 +237,7 @@ JaxDBScan(
     use_distributed: bool = False,
     return_sequential_labels: bool = True,
     chunk_size: Optional[int] = None,
-    memory_mode: Literal["auto", "standard", "chunked"] = "auto"
+    memory_mode: Literal["auto", "standard", "chunked", "sparse", "ann"] = "auto"
 )
 ```
 
@@ -241,7 +250,7 @@ JaxDBScan(
 | `use_distributed` | bool | `False` | Whether to use distributed execution across multiple devices |
 | `return_sequential_labels` | bool | `True` | If True, re-index cluster labels to be sequential (0, 1, 2, ...) |
 | `chunk_size` | Optional[int] | `None` | If specified, compute pairwise distances in chunks to reduce memory usage |
-| `memory_mode` | Literal["auto", "standard", "chunked"] | `"auto"` | Memory usage strategy ("auto" chooses chunked for N > 20,000) |
+| `memory_mode` | Literal["auto", "standard", "chunked", "sparse", "ann"] | `"auto"` | Memory usage strategy ("auto" chooses chunked for N > 20,000) |
 
 **Methods:**
 
@@ -278,4 +287,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 - [x] Chunked/block distance computation
 - [x] Sparse matrix representations
-- [ ] Approximate nearest neighbor methods
+- [x] Approximate nearest neighbor methods

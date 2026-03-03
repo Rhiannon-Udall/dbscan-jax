@@ -601,6 +601,128 @@ def run_sparse():
     logger.info("- Use standard mode for general purpose")
 
 
+def test_ann_statistics():
+    """Test approximate nearest neighbor grid statistics."""
+    print_section("ANN Grid Statistics Test")
+
+    logger.info("\nGenerating dataset with different epsilons...")
+    X_np, _ = make_moons(n_samples=5000, noise=0.1, random_state=42)
+    X = jnp.array(X_np)
+
+    epsilons = [0.05, 0.1, 0.2, 0.5]
+
+    logger.info("\nAnalyzing grid cell distribution for different epsilon values:")
+    for eps in epsilons:
+        # Compute grid statistics
+        grid_min = jnp.min(X, axis=0) - eps
+        cell_size = eps
+        cell_coords = jnp.floor((X - grid_min) / cell_size).astype(int)
+        D = X.shape[1]
+        powers = jnp.array([D**i for i in range(D)])
+        cell_ids = jnp.sum(cell_coords * powers[None, :], axis=1)
+        unique_cells = jnp.unique(cell_ids)
+
+        logger.info(f"\n  eps={eps:.2f}:")
+        logger.info(f"    Number of grid cells: {unique_cells.size}")
+        logger.info(
+            f"    Avg points per cell: {X.shape[0] / max(unique_cells.size, 1):.1f}"
+        )
+
+
+def test_ann_mode():
+    """Test approximate nearest neighbor mode implementation."""
+    print_section("ANN Mode Test")
+
+    logger.info("\nGenerating dataset (n_samples=5000)...")
+    X_np, _ = make_moons(n_samples=5000, noise=0.1, random_state=42)
+    X = jnp.array(X_np)
+
+    # Test ANN mode with small epsilon
+    logger.info("\n--- ANN Mode with Small Epsilon (eps=0.1) ---")
+    model_ann = JaxDBScan(eps=0.1, min_pts=5, memory_mode="ann")
+    start = time.time()
+    labels_ann = model_ann.fit_predict(X)
+    time_ann = time.time() - start
+    labels_ann_np = np.array(labels_ann)
+    logger.info(f"Execution time: {time_ann:.4f}s")
+    logger.info(
+        f"Clusters: {len(set(labels_ann_np)) - (1 if -1 in labels_ann_np else 0)}"
+    )
+    logger.info(f"Noise points: {np.sum(labels_ann_np == -1)}")
+
+    # Compare with standard mode
+    logger.info("\n--- Standard Mode Comparison ---")
+    model_standard = JaxDBScan(eps=0.1, min_pts=5, memory_mode="standard")
+    start = time.time()
+    labels_standard = model_standard.fit_predict(X)
+    time_standard = time.time() - start
+    labels_standard_np = np.array(labels_standard)
+    logger.info(f"Execution time: {time_standard:.4f}s")
+    logger.info(
+        f"Clusters: {len(set(labels_standard_np)) - (1 if -1 in labels_standard_np else 0)}"
+    )
+    logger.info(f"Noise points: {np.sum(labels_standard_np == -1)}")
+
+    # Verify results
+    logger.info("\n--- Verification ---")
+    if np.array_equal(labels_ann_np, labels_standard_np):
+        logger.info("✓ SUCCESS: ANN and standard modes produce identical results!")
+    else:
+        # Check if the number of clusters and noise points are similar
+        n_clusters_ann = len(set(labels_ann_np)) - (1 if -1 in labels_ann_np else 0)
+        n_clusters_standard = len(set(labels_standard_np)) - (
+            1 if -1 in labels_standard_np else 0
+        )
+        n_noise_ann = np.sum(labels_ann_np == -1)
+        n_noise_standard = np.sum(labels_standard_np == -1)
+
+        logger.info("⚠ INFO: Results differ between modes (expected for ANN)")
+        logger.info(f"  ANN: {n_clusters_ann} clusters, {n_noise_ann} noise")
+        logger.info(
+            f"  Standard: {n_clusters_standard} clusters, {n_noise_standard} noise"
+        )
+
+        # Check if they're reasonably close
+        if (
+            abs(n_clusters_ann - n_clusters_standard) <= 1
+            and abs(n_noise_ann - n_noise_standard) <= 100
+        ):
+            logger.info("✓ Results are reasonably close (within tolerance)")
+        else:
+            logger.info("⚠ WARNING: Results differ significantly")
+
+    logger.info(f"\nSpeedup: {time_standard / time_ann:.2f}x")
+
+    return X_np, labels_ann
+
+
+def run_ann():
+    """Run approximate nearest neighbor tests."""
+    logger.info("\n" + "=" * 60)
+    logger.info("  JaxDBScan Approximate Nearest Neighbor Test Suite")
+    logger.info("=" * 60)
+
+    # Check environment
+    _ = check_environment()
+
+    # Test ANN statistics
+    test_ann_statistics()
+
+    # Test ANN mode
+    test_ann_mode()
+
+    print_section("Summary")
+    logger.info("✓ All ANN tests completed!")
+    logger.info("\nKey findings:")
+    logger.info("- ANN mode uses grid-based spatial indexing")
+    logger.info("- Only computes distances within grid cells")
+    logger.info("- Fastest mode but may miss some neighbors across cell boundaries")
+    logger.info("\nRecommendations:")
+    logger.info("- Use ANN mode for very large datasets with small epsilon")
+    logger.info("- Best when data is well-distributed across space")
+    logger.info("- May have lower accuracy than exact methods")
+
+
 def main(run_type: str = "single"):
     """
     Run test suite.
@@ -611,6 +733,7 @@ def main(run_type: str = "single"):
             - "multi": Run multi-device comparison tests
             - "chunked": Run chunked distance computation tests
             - "sparse": Run sparse matrix representation tests
+            - "ann": Run approximate nearest neighbor tests
     """
     if run_type == "multi":
         run_multi()
@@ -618,6 +741,8 @@ def main(run_type: str = "single"):
         run_chunked()
     elif run_type == "sparse":
         run_sparse()
+    elif run_type == "ann":
+        run_ann()
     else:
         run_single()
 

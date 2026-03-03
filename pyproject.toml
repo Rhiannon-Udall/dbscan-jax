@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "jax implementation of the DBSCAN clustering algorithm"
 readme = "README.md"
 requires-python = ">=3.12"
+license = { file = "LICENSE" }
 dependencies = [
     "ipython>=9.10.0",
     "jax[cuda12]>=0.9.1",

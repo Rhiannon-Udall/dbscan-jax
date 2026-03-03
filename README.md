@@ -341,12 +341,3 @@ python benchmark.py --benchmark modes
 
 MIT
 
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## TODO
-
-- [x] Chunked/block distance computation
-- [x] Sparse matrix representations
-- [x] Approximate nearest neighbor methods

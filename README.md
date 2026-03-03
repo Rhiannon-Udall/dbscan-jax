@@ -126,16 +126,21 @@ labels = model.fit_predict(X)
 - Often faster due to better cache utilization
 - JAX-compatible with JIT compilation
 
+![chunked mode](./images/dbscan_chunked.png)
+
 ### Running the Example Script
 
 The project includes a comprehensive example script:
 
 ```bash
-# Run single-device tests
+# Run standard tests (single-device and distributed)
 python example.py
 
-# Run multi-device comparison tests (with CPU emulation)
-XLA_FLAGS="--xla_force_host_platform_device_count=4" python example.py multi
+# Run multi-device comparison tests
+python example.py multi
+
+# Run chunked distance computation tests
+python example.py chunked
 ```
 
 ## Technical Implementation
@@ -211,7 +216,6 @@ jit_fn = jax.jit(
 - **Chunked mode:** N > 20,000 points (automatic with `memory_mode="auto"`)
 - **Very large datasets:** Consider approximate nearest neighbor methods
 
-
 ## API Reference
 
 ### `JaxDBScan`
@@ -261,7 +265,6 @@ Tested on `make_moons` dataset (n_samples=2000, noise=0.1):
 
 *Single device with distributed sharding enabled
 
-
 ## License
 
 MIT
@@ -270,8 +273,8 @@ MIT
 
 Contributions are welcome! Please feel free to submit a Pull Request.
 
-
 ## TODO
+
 - [x] Chunked/block distance computation
 - [ ] Sparse matrix representations
 - [ ] Approximate nearest neighbor methods

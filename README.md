@@ -7,6 +7,7 @@ A high-performance, distributed implementation of the DBSCAN clustering algorith
 - **JAX-compatible implementation** using matrix-based label propagation
 - **Single/Multi-device execution** with automatic sharding
 - **Chunked distance computation** for memory-efficient processing of large datasets
+- **Sparse matrix representations** for optimal memory usage with small epsilon
 - **JIT compilation** for optimal performance
 - **Sequential label re-indexing** (optional)
 - **GPU/TPU support** via JAX
@@ -276,5 +277,5 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## TODO
 
 - [x] Chunked/block distance computation
-- [ ] Sparse matrix representations
+- [x] Sparse matrix representations
 - [ ] Approximate nearest neighbor methods

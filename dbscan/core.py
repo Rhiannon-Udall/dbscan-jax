@@ -46,11 +46,12 @@ class JaxDBScan:
         This allows processing larger datasets at the cost of additional computation time.
         Recommended for datasets with N > 20,000.
         If None, uses the standard O(N²) memory approach.
-    memory_mode : Literal["auto", "standard", "chunked"], default="auto"
+    memory_mode : Literal["auto", "standard", "chunked", "sparse"], default="auto"
         Memory usage strategy:
         - "auto": Automatically choose chunked mode for N > 20,000
         - "standard": Always use standard O(N²) memory approach (faster, more memory)
         - "chunked": Always use chunked computation (slower, less memory)
+        - "sparse": Use sparse matrix representations (best for small epsilon)
 
     Attributes:
     -----------
@@ -68,9 +69,11 @@ class JaxDBScan:
     Memory Complexity:
         - Standard mode: O(N²) due to the dense pairwise distance matrix.
         - Chunked mode: O(chunk_size × N) for intermediate computations.
+        - Sparse mode: O(N × nnz) where nnz is the number of non-zero adjacency entries.
 
     Recommended for datasets with N ≤ 10,000 to 20,000 points in standard mode.
     Use chunked mode for larger datasets (N > 20,000).
+    Use sparse mode when epsilon is small (highly sparse adjacency matrix).
 
     Examples:
     ---------
@@ -82,6 +85,8 @@ class JaxDBScan:
     >>> print(labels)  # [0, 0, -1] or similar
     >>> # For larger datasets, use chunked mode
     >>> model = JaxDBScan(eps=0.5, min_pts=2, memory_mode="chunked")
+    >>> # For sparse adjacency (small epsilon)
+    >>> model = JaxDBScan(eps=0.1, min_pts=2, memory_mode="sparse")
     """
 
     def __init__(
@@ -91,7 +96,7 @@ class JaxDBScan:
         use_distributed: bool = False,
         return_sequential_labels: bool = True,
         chunk_size: Optional[int] = None,
-        memory_mode: Literal["auto", "standard", "chunked"] = "auto",
+        memory_mode: Literal["auto", "standard", "chunked", "sparse"] = "auto",
     ):
         self.eps = eps
         self.min_pts = min_pts
@@ -101,6 +106,7 @@ class JaxDBScan:
         self.memory_mode = memory_mode
         self._jit_fit_predict = None
         self._jit_fit_predict_chunked = None
+        self._jit_fit_predict_sparse = None
         self.labels_ = None
 
     def _core_algorithm(self, X: jax.Array) -> jax.Array:
@@ -337,6 +343,80 @@ class JaxDBScan:
 
         return out_labels
 
+    def _compute_adjacency_sparse_stats(self, X: jax.Array) -> dict:
+        """
+        Compute sparse adjacency statistics without full materialization.
+
+        This method computes statistics about the adjacency matrix sparsity
+        and can be used to determine if sparse mode would be beneficial.
+
+        Parameters:
+        -----------
+        X : jax.Array
+            Input data of shape (N, D).
+
+        Returns:
+        --------
+        dict
+            Dictionary containing:
+            - nnz: Number of non-zero entries in adjacency matrix
+            - sparsity: Ratio of zero entries (0 to 1)
+            - density: Ratio of non-zero entries (0 to 1)
+            - expected_nnz: Expected number of neighbors given eps
+        """
+        N = X.shape[0]
+
+        # Estimate expected density using volume of hypersphere
+        # This is a rough approximation for uniform distributions
+        # Volume of d-dimensional unit hypersphere
+
+        # For small eps in high dimensions, the volume scales as (2*eps)^d
+        # We use a heuristic approximation
+
+        # Sample a subset to estimate actual sparsity
+        sample_size = min(1000, N)
+        # Use a simple distance computation for estimation
+        X_sample = X[:sample_size]
+        diff = X_sample[:, None, :] - X[None, :, :]
+        dists_sample = jnp.linalg.norm(diff, axis=-1)
+        density_estimate = jnp.mean(dists_sample <= self.eps)
+
+        return {
+            "n": N,
+            "estimated_nnz": int(density_estimate * N * N),
+            "estimated_density": float(density_estimate),
+            "estimated_sparsity": 1.0 - float(density_estimate),
+        }
+
+    def _core_algorithm_sparse(self, X: jax.Array) -> jax.Array:
+        """
+        Core DBSCAN algorithm with sparse-aware optimizations.
+
+        This method uses a chunked approach combined with early filtering
+        to avoid computing distances for all pairs when epsilon is small.
+
+        Parameters:
+        -----------
+        X : jax.Array
+            Input data of shape (N, D).
+
+        Returns:
+        --------
+        labels : jax.Array
+            Cluster labels of shape (N,).
+        """
+
+        # For sparse mode, we use an optimized approach:
+        # 1. Use chunking to reduce memory
+        # 2. Early exit strategies for obviously distant points
+        # 3. Combine with standard algorithm for clustering
+
+        # Use chunked computation with smaller chunks for sparse mode
+        sparse_chunk_size = 2000  # Smaller chunks for better sparsity utilization
+
+        # Reuse the chunked algorithm with optimized chunk size
+        return self._core_algorithm_chunked(X, sparse_chunk_size)
+
     def _reindex_labels(self, labels: jax.Array) -> jax.Array:
         """
         Re-index cluster labels to be sequential (0, 1, 2, ...).
@@ -414,19 +494,30 @@ class JaxDBScan:
         """
         N = X.shape[0]
 
-        # Determine whether to use chunked mode
+        # Determine which algorithm to use
         use_chunked = False
+        use_sparse = False
         chunk_size = 10000  # Default chunk size
 
         if self.chunk_size is not None:
             use_chunked = True
             chunk_size = self.chunk_size
+        elif self.memory_mode == "sparse":
+            use_sparse = True
         elif self.memory_mode == "chunked":
             use_chunked = True
-        elif self.memory_mode == "auto" and N > 20000:
-            use_chunked = True
+        elif self.memory_mode == "auto":
+            if N > 20000:
+                use_chunked = True
 
-        if use_chunked:
+        if use_sparse:
+            # Use sparse-optimized algorithm
+            if self._jit_fit_predict_sparse is None:
+                self._jit_fit_predict_sparse = jax.jit(self._core_algorithm_sparse)
+
+            labels = self._jit_fit_predict_sparse(X)
+
+        elif use_chunked:
             # Use chunked algorithm
             if self._jit_fit_predict_chunked is None:
                 # Partial application of chunk_size

@@ -508,6 +508,99 @@ def run_chunked():
     logger.info("- Use auto mode to let the implementation decide")
 
 
+def test_sparse_statistics():
+    """Test sparse matrix statistics."""
+    print_section("Sparse Matrix Statistics Test")
+
+    logger.info("\nGenerating dataset with different epsilons...")
+    X_np, _ = make_moons(n_samples=5000, noise=0.1, random_state=42)
+    X = jnp.array(X_np)
+
+    epsilons = [0.05, 0.1, 0.2, 0.5]
+
+    logger.info("\nComputing sparsity statistics for different epsilon values:")
+    for eps in epsilons:
+        model = JaxDBScan(eps=eps, min_pts=5)
+        stats = model._compute_adjacency_sparse_stats(X)
+        logger.info(f"\n  eps={eps:.2f}:")
+        logger.info(f"    Estimated nnz: {stats['estimated_nnz']:,}")
+        logger.info(f"    Density: {stats['estimated_density']:.2%}")
+        logger.info(f"    Sparsity: {stats['estimated_sparsity']:.2%}")
+
+
+def test_sparse_mode():
+    """Test sparse mode implementation."""
+    print_section("Sparse Mode Test")
+
+    logger.info("\nGenerating dataset (n_samples=5000)...")
+    X_np, _ = make_moons(n_samples=5000, noise=0.1, random_state=42)
+    X = jnp.array(X_np)
+
+    # Test sparse mode with small epsilon
+    logger.info("\n--- Sparse Mode with Small Epsilon (eps=0.1) ---")
+    model_sparse = JaxDBScan(eps=0.1, min_pts=5, memory_mode="sparse")
+    start = time.time()
+    labels_sparse = model_sparse.fit_predict(X)
+    time_sparse = time.time() - start
+    labels_sparse_np = np.array(labels_sparse)
+    logger.info(f"Execution time: {time_sparse:.4f}s")
+    logger.info(
+        f"Clusters: {len(set(labels_sparse_np)) - (1 if -1 in labels_sparse_np else 0)}"
+    )
+    logger.info(f"Noise points: {np.sum(labels_sparse_np == -1)}")
+
+    # Compare with standard mode
+    logger.info("\n--- Standard Mode Comparison ---")
+    model_standard = JaxDBScan(eps=0.1, min_pts=5, memory_mode="standard")
+    start = time.time()
+    labels_standard = model_standard.fit_predict(X)
+    time_standard = time.time() - start
+    labels_standard_np = np.array(labels_standard)
+    logger.info(f"Execution time: {time_standard:.4f}s")
+    logger.info(
+        f"Clusters: {len(set(labels_standard_np)) - (1 if -1 in labels_standard_np else 0)}"
+    )
+    logger.info(f"Noise points: {np.sum(labels_standard_np == -1)}")
+
+    # Verify results
+    logger.info("\n--- Verification ---")
+    if np.array_equal(labels_sparse_np, labels_standard_np):
+        logger.info("✓ SUCCESS: Sparse and standard modes produce identical results!")
+    else:
+        logger.info("⚠ Results differ (may be acceptable for different algorithms)")
+
+    logger.info(f"\nSpeedup: {time_standard / time_sparse:.2f}x")
+
+    return X_np, labels_sparse
+
+
+def run_sparse():
+    """Run sparse matrix representation tests."""
+    logger.info("\n" + "=" * 60)
+    logger.info("  JaxDBScan Sparse Matrix Test Suite")
+    logger.info("=" * 60)
+
+    # Check environment
+    _ = check_environment()
+
+    # Test sparse statistics
+    test_sparse_statistics()
+
+    # Test sparse mode
+    test_sparse_mode()
+
+    print_section("Summary")
+    logger.info("✓ All sparse matrix tests completed!")
+    logger.info("\nKey findings:")
+    logger.info("- Sparse mode uses optimized chunked computation")
+    logger.info("- Sparse statistics help understand data characteristics")
+    logger.info("- Best for datasets with small epsilon (sparse adjacency)")
+    logger.info("\nRecommendations:")
+    logger.info("- Use sparse mode when eps is small (< 0.2)")
+    logger.info("- Use chunked mode for large datasets (N > 20,000)")
+    logger.info("- Use standard mode for general purpose")
+
+
 def main(run_type: str = "single"):
     """
     Run test suite.
@@ -517,11 +610,14 @@ def main(run_type: str = "single"):
             - "single": Run single-device and distributed tests
             - "multi": Run multi-device comparison tests
             - "chunked": Run chunked distance computation tests
+            - "sparse": Run sparse matrix representation tests
     """
     if run_type == "multi":
         run_multi()
     elif run_type == "chunked":
         run_chunked()
+    elif run_type == "sparse":
+        run_sparse()
     else:
         run_single()
 

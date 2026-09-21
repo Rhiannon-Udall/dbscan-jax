@@ -100,6 +100,7 @@ class JaxDBScan:
         return_sequential_labels: bool = True,
         chunk_size: Optional[int] = None,
         memory_mode: Literal["auto", "standard", "chunked", "sparse", "ann"] = "auto",
+        metric: Literal["euclidean", "precomputed"] = "euclidean"
     ):
         self.eps = eps
         self.min_pts = min_pts
@@ -112,6 +113,7 @@ class JaxDBScan:
         self._jit_fit_predict_sparse = None
         self._jit_fit_predict_ann = None
         self.labels_ = None
+        self.metric = metric
 
     def _core_algorithm(self, X: jax.Array) -> jax.Array:
         """
@@ -140,8 +142,11 @@ class JaxDBScan:
 
         # 1. Pairwise Distances (O(N²) memory)
         # For N > 20,000, consider implementing chunked/block distance computation
-        diff = X[:, None, :] - X[None, :, :]
-        dists = jnp.linalg.norm(diff, axis=-1)
+        if self.metric =="euclidean":
+            diff = X[:, None, :] - X[None, :, :]
+            dists = jnp.linalg.norm(diff, axis=-1)
+        elif self.metric =="precomputed":
+            dists = X
 
         # 2. Adjacency Matrix
         A = dists <= self.eps
